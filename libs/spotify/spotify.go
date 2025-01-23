@@ -13,9 +13,20 @@ import (
 	spotifyauth "github.com/zmb3/spotify/v2/auth"
 )
 
+// Client is a wrapper around the Spotify client.
 type Client struct {
 	client *spotify.Client
 }
+
+// MigratePlaylist is a map of playlist names, which will be used in YTM to
+// preserve the playlists name, and a slice of playlist items.
+type MigratePlaylist struct {
+	Playlist spotify.SimplePlaylist
+	Items    []spotify.PlaylistItem
+}
+
+// MigratePlaylists is a slice of MigratePlaylist.
+type MigratePlaylists []MigratePlaylist
 
 // redirectURI is the OAuth redirect URI for the application.
 // You must register an application at Spotify's developer portal
@@ -59,8 +70,8 @@ func NewClient(ctx context.Context, clientID, clientSecret string) (*Client, err
 	return &Client{client: client}, nil
 }
 
-// GetPlaylists retrieves all private playlists for the current user.
-func (c *Client) GetPlaylists(ctx context.Context) ([]spotify.SimplePlaylist, error) {
+// AllPlaylists retrieves all private playlists for the current user.
+func (c *Client) AllPlaylists(ctx context.Context) ([]spotify.SimplePlaylist, error) {
 	playlists, err := c.client.CurrentUsersPlaylists(ctx)
 	if err != nil {
 		return nil, err
@@ -77,6 +88,44 @@ func (c *Client) GetPlaylists(ctx context.Context) ([]spotify.SimplePlaylist, er
 		}
 	}
 	return allPlaylists, nil
+}
+
+// AllItemsFromPlaylist retrieves all items (tracks and episodes) from a given playlist ID.
+func (c *Client) AllItemsFromPlaylist(ctx context.Context, playlistID spotify.ID) ([]spotify.PlaylistItem, error) {
+	var allItems []spotify.PlaylistItem
+	limit := 50 // Maximum limit for playlist item retrieval
+	for offset := 0; ; offset += limit {
+		itemPage, err := c.client.GetPlaylistItems(ctx, playlistID, spotify.Offset(offset), spotify.Limit(limit))
+		if err != nil {
+			return nil, fmt.Errorf("could not get playlist items: %w", err)
+		}
+		allItems = append(allItems, itemPage.Items...)
+		if itemPage.Next == "" {
+			break
+		}
+	}
+	return allItems, nil
+}
+
+// PrepareMigration retrieves all playlists and their items into a convenient
+// data structure for migration.
+func (c *Client) PrepareMigration(ctx context.Context) (MigratePlaylists, error) {
+	playlists, err := c.AllPlaylists(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("could not get playlists: %w", err)
+	}
+	var migratePlaylists MigratePlaylists
+	for _, p := range playlists {
+		items, err := c.AllItemsFromPlaylist(ctx, p.ID)
+		if err != nil {
+			return nil, fmt.Errorf("could not get items for playlist %s: %w", p.Name, err)
+		}
+		migratePlaylists = append(migratePlaylists, MigratePlaylist{
+			Playlist: p,
+			Items:    items,
+		})
+	}
+	return migratePlaylists, nil
 }
 
 // generateRandomState is a helper function to generate a random state value

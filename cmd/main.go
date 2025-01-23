@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -21,13 +22,29 @@ func main() {
 	if err != nil {
 		log.Fatalf("Could not create Spotify client: %v", err)
 	}
-	playlists, err := client.GetPlaylists(ctx)
+	migratedPlaylists, err := client.PrepareMigration(ctx) // Use PrepareMigration
 	if err != nil {
-		log.Fatalf("Could not get playlists: %v", err)
+		log.Fatalf("Could not get migrated playlists: %v", err)
 	}
-	fmt.Println("Your Spotify Playlists:")
-	for _, p := range playlists {
-		fmt.Printf("- %s (ID: %s)\n", p.Name, p.ID)
+	for _, mp := range migratedPlaylists {
+		playlistJSON, err := json.MarshalIndent(mp.Playlist, "", "  ")
+		if err != nil {
+			log.Printf("Error marshaling playlist to JSON: %v", err)
+			continue
+		}
+		fmt.Println("Playlist:")
+		fmt.Println(string(playlistJSON))
+
+		fmt.Println("\nItems:")
+		for _, item := range mp.Items {
+			itemJSON, err := json.MarshalIndent(item, "", "  ")
+			if err != nil {
+				log.Printf("Error marshaling item to JSON: %v", err)
+				continue
+			}
+			fmt.Println(string(itemJSON))
+		}
+		fmt.Println("------------------") // Separator between playlists
 	}
 
 }
