@@ -42,6 +42,7 @@ func main() {
 		log.Fatalf("Failed to write JSON to temporary file: %v", err)
 	}
 
-	log.Printf("Successfully dumped playlists to %s", tempFile.Name())
+	// Pretty print the playlists.
+	spotify.PrettyPrintPlaylists(migratedPlaylists)
 
 }

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/zmb3/spotify/v2"
 	spotifyauth "github.com/zmb3/spotify/v2/auth"
@@ -130,6 +131,24 @@ func (c *Client) PrepareMigration(ctx context.Context) (MigratePlaylists, error)
 		})
 	}
 	return migratePlaylists, nil
+}
+
+// PrettyPrintPlaylists prints the playlists and their items in a human-readable
+// format.
+func PrettyPrintPlaylists(playlists MigratePlaylists) {
+	for _, p := range playlists {
+		fmt.Printf("Playlist: %s\n", p.Playlist.Name)
+		for _, item := range p.Items {
+			track := item.Track.Track
+			if track != nil {
+				artists := make([]string, len(track.Artists))
+				for i, artist := range track.Artists {
+					artists[i] = artist.Name
+				}
+				fmt.Printf("  - %s by %s\n", track.Name, strings.Join(artists, ", "))
+			}
+		}
+	}
 }
 
 // generateRandomState is a helper function to generate a random state value
