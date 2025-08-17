@@ -63,7 +63,11 @@ func NewClient(ctx context.Context, clientID, clientSecret string) (*Client, err
 	http.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
 		callbackHandler(w, r, auth, state) // Call the closure handler.
 	})
-	go http.ListenAndServe(":8080", nil)
+	go func() {
+		if err := http.ListenAndServe(":8080", nil); err != nil {
+			log.Fatalf("Failed to start server: %v", err)
+		}
+	}()
 	url := auth.AuthURL(state)
 	fmt.Println("Please log in to Spotify by visiting the following page in your browser:", url)
 	client := <-ch // Receive from channel after callback is complete

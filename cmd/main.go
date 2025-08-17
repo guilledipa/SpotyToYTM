@@ -4,7 +4,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log"
 	"os"
 
@@ -18,33 +17,31 @@ func main() {
 		log.Fatal("SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET environment variables must be set.")
 	}
 	ctx := context.Background()
+
+	log.Println("To authenticate, please open the URL printed below in your web browser.")
 	client, err := spotify.NewClient(ctx, clientID, clientSecret)
 	if err != nil {
 		log.Fatalf("Could not create Spotify client: %v", err)
 	}
+
+	log.Println("Authentication successful! Pulling playlists...")
 	migratedPlaylists, err := client.PrepareMigration(ctx) // Use PrepareMigration
 	if err != nil {
 		log.Fatalf("Could not get migrated playlists: %v", err)
 	}
-	for _, mp := range migratedPlaylists {
-		playlistJSON, err := json.MarshalIndent(mp.Playlist, "", "  ")
-		if err != nil {
-			log.Printf("Error marshaling playlist to JSON: %v", err)
-			continue
-		}
-		fmt.Println("Playlist:")
-		fmt.Println(string(playlistJSON))
 
-		fmt.Println("\nItems:")
-		for _, item := range mp.Items {
-			itemJSON, err := json.MarshalIndent(item, "", "  ")
-			if err != nil {
-				log.Printf("Error marshaling item to JSON: %v", err)
-				continue
-			}
-			fmt.Println(string(itemJSON))
-		}
-		fmt.Println("------------------") // Separator between playlists
+	// Create a temporary file to store the JSON data.
+	tempFile, err := os.CreateTemp("", "spotify-playlists-*.json")
+	if err != nil {
+		log.Fatalf("Failed to create temporary file: %v", err)
 	}
+	defer tempFile.Close()
+
+	// Write the JSON data to the temporary file.
+	if err := json.NewEncoder(tempFile).Encode(migratedPlaylists); err != nil {
+		log.Fatalf("Failed to write JSON to temporary file: %v", err)
+	}
+
+	log.Printf("Successfully dumped playlists to %s", tempFile.Name())
 
 }
