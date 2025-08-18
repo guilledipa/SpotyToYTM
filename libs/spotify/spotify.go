@@ -5,9 +5,11 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/zmb3/spotify/v2"
@@ -19,15 +21,29 @@ type Client struct {
 	client *spotify.Client
 }
 
-// MigratePlaylist is a map of playlist names, which will be used in YTM to
-// preserve the playlists name, and a slice of playlist items.
-type MigratePlaylist struct {
-	Playlist spotify.SimplePlaylist
-	Items    []spotify.PlaylistItem
+// Artist represents a single artist.
+type Artist struct {
+	Name string `json:"name"`
 }
 
-// MigratePlaylists is a slice of MigratePlaylist.
-type MigratePlaylists []MigratePlaylist
+// Album represents a single album.
+type Album struct {
+	Name    string   `json:"name"`
+	Artists []Artist `json:"artists"`
+}
+
+// Track represents a single track.
+type Track struct {
+	Name    string   `json:"name"`
+	Artists []Artist `json:"artists"`
+	Album   Album    `json:"album"`
+}
+
+// Playlist represents the data to be saved for each playlist.
+type Playlist struct {
+	Name   string  `json:"name"`
+	Tracks []Track `json:"tracks"`
+}
 
 // redirectURI is the OAuth redirect URI for the application.
 // You must register an application at Spotify's developer portal
@@ -112,43 +128,72 @@ func (c *Client) AllItemsFromPlaylist(ctx context.Context, playlistID spotify.ID
 	return allItems, nil
 }
 
-// PrepareMigration retrieves all playlists and their items into a convenient
-// data structure for migration.
-func (c *Client) PrepareMigration(ctx context.Context) (MigratePlaylists, error) {
+// PrepareMigration retrieves all playlists and their items and saves them to disk.
+func (c *Client) PrepareMigration(ctx context.Context, outputDir string) error {
 	playlists, err := c.AllPlaylists(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("could not get playlists: %w", err)
+		return fmt.Errorf("could not get playlists: %w", err)
 	}
-	var migratePlaylists MigratePlaylists
+
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		return fmt.Errorf("could not create output directory: %w", err)
+	}
+
 	for _, p := range playlists {
 		items, err := c.AllItemsFromPlaylist(ctx, p.ID)
 		if err != nil {
-			return nil, fmt.Errorf("could not get items for playlist %s: %w", p.Name, err)
+			log.Printf("could not get items for playlist %s: %v. Skipping playlist.", p.Name, err)
+			continue
 		}
-		migratePlaylists = append(migratePlaylists, MigratePlaylist{
-			Playlist: p,
-			Items:    items,
-		})
-	}
-	return migratePlaylists, nil
-}
 
-// PrettyPrintPlaylists prints the playlists and their items in a human-readable
-// format.
-func PrettyPrintPlaylists(playlists MigratePlaylists) {
-	for _, p := range playlists {
-		fmt.Printf("Playlist: %s\n", p.Playlist.Name)
-		for _, item := range p.Items {
-			track := item.Track.Track
-			if track != nil {
-				artists := make([]string, len(track.Artists))
-				for i, artist := range track.Artists {
-					artists[i] = artist.Name
+		var tracks []Track
+		for _, item := range items {
+			if item.Track.Track != nil {
+				var artists []Artist
+				for _, artist := range item.Track.Track.Artists {
+					artists = append(artists, Artist{Name: artist.Name})
 				}
-				fmt.Printf("  - %s by %s\n", track.Name, strings.Join(artists, ", "))
+
+				var albumArtists []Artist
+				for _, artist := range item.Track.Track.Album.Artists {
+					albumArtists = append(albumArtists, Artist{Name: artist.Name})
+				}
+
+				tracks = append(tracks, Track{
+					Name:    item.Track.Track.Name,
+					Artists: artists,
+					Album: Album{
+						Name:    item.Track.Track.Album.Name,
+						Artists: albumArtists,
+					},
+				})
 			}
 		}
+
+		playlist := Playlist{
+			Name:   p.Name,
+			Tracks: tracks,
+		}
+
+		// Sanitize playlist name for filename
+		safePlaylistName := strings.ReplaceAll(p.Name, "/", "_")
+		filePath := fmt.Sprintf("%s/%s.json", outputDir, safePlaylistName)
+
+		file, err := os.Create(filePath)
+		if err != nil {
+			log.Printf("could not create file for playlist %s: %v", p.Name, err)
+			continue
+		}
+		defer file.Close()
+
+		encoder := json.NewEncoder(file)
+		encoder.SetIndent("", "  ")
+		if err := encoder.Encode(playlist); err != nil {
+			log.Printf("could not encode playlist %s: %v", p.Name, err)
+			continue
+		}
 	}
+	return nil
 }
 
 // generateRandomState is a helper function to generate a random state value
