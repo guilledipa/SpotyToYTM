@@ -8,11 +8,18 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/option"
 	"google.golang.org/api/youtube/v3"
+)
+
+const (
+	// https://developers.google.com/youtube/v3/determine_quota_cost
+	apiQuota = 10000            // YouTube API daily quota for playlist write operations
+	tokFile  = "ytm-token.json" // In user's home directory
 )
 
 // Client is a wrapper around the YouTube Music client.
@@ -44,10 +51,6 @@ func NewClient(ctx context.Context, clientSecretFile string) (*Client, error) {
 
 // getClient retrieves a token, saves the token, then returns the generated client.
 func getClient(ctx context.Context, config *oauth2.Config) *http.Client {
-	// The file token.json stores the user's access and refresh tokens, and is
-	// created automatically when the authorization flow completes for the first
-	// time.
-	tokFile := "token.json"
 	tok, err := tokenFromFile(tokFile)
 	if err != nil {
 		tok = getTokenFromWeb(config)
@@ -59,8 +62,8 @@ func getClient(ctx context.Context, config *oauth2.Config) *http.Client {
 // getTokenFromWeb requests a token from the web, then returns the retrieved token.
 func getTokenFromWeb(config *oauth2.Config) *oauth2.Token {
 	authURL := config.AuthCodeURL("state-token", oauth2.AccessTypeOffline)
-	fmt.Printf("Go to the following link in your browser then type the " +
-		"authorization code: \n%v\n", authURL)
+	fmt.Printf("Go to the following link %v in your browser then type the "+
+		"authorization code: \n", authURL)
 
 	var authCode string
 	if _, err := fmt.Scan(&authCode); err != nil {
@@ -75,8 +78,12 @@ func getTokenFromWeb(config *oauth2.Config) *oauth2.Token {
 }
 
 // tokenFromFile retrieves a token from a local file.
-func tokenFromFile(file string) (*oauth2.Token, error) {
-	f, err := os.Open(file)
+func tokenFromFile(fileName string) (*oauth2.Token, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return nil, err
+	}
+	f, err := os.Open(filepath.Join(homeDir, fileName))
 	if err != nil {
 		return nil, err
 	}
