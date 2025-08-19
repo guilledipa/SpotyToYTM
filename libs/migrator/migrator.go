@@ -15,6 +15,9 @@ import (
 	"github.com/guilledipa/SpotyToYTM/libs/youtubemusic"
 )
 
+// FailedTracksMap stores tracks that failed to migrate, mapped by YouTube Music Playlist ID.
+type FailedTracksMap map[string][]spotify.Track
+
 // Migrate reads playlist files from a directory and migrates them to YouTube Music.
 func Migrate(ctx context.Context, ytClient *youtubemusic.Client, playlistsDir string) error {
 	files, err := os.ReadDir(playlistsDir)
@@ -22,8 +25,13 @@ func Migrate(ctx context.Context, ytClient *youtubemusic.Client, playlistsDir st
 		return fmt.Errorf("could not read playlists directory: %w", err)
 	}
 
+	failedTracks := make(FailedTracksMap)
+
 	for _, file := range files {
-		if filepath.Ext(file.Name()) != ".json" {
+		if file.IsDir() { // Skip directories
+			continue
+		}
+		if filepath.Ext(file.Name()) != ".json" { // Only process .json files
 			continue
 		}
 
@@ -39,6 +47,11 @@ func Migrate(ctx context.Context, ytClient *youtubemusic.Client, playlistsDir st
 		var playlist spotify.Playlist
 		if err := json.Unmarshal(data, &playlist); err != nil {
 			log.Printf("could not unmarshal playlist from file %s: %v. Skipping.", filePath, err)
+			continue
+		}
+
+		if playlist.Name == "" { // Validate playlist name
+			log.Printf("Playlist name is empty in file %s. Skipping.", filePath)
 			continue
 		}
 
@@ -60,13 +73,31 @@ func Migrate(ctx context.Context, ytClient *youtubemusic.Client, playlistsDir st
 
 			log.Printf("Searching for track: %s", query)
 			_, err := ytClient.SearchAndAddSong(ctx, ytPlaylist.Id, query)
-		if err != nil {
+			if err != nil {
 				log.Printf("could not add track '%s' to playlist '%s': %v", query, ytPlaylist.Snippet.Title, err)
-				// Continue to the next track
+				failedTracks[ytPlaylist.Id] = append(failedTracks[ytPlaylist.Id], track)
 			} else {
 				log.Printf("Successfully added track '%s' to playlist '%s'", query, ytPlaylist.Snippet.Title)
 			}
 		}
+	}
+
+	// Save failed tracks to a JSON file
+	if len(failedTracks) > 0 {
+		failedTracksFile, err := os.Create("failed_tracks.json")
+		if err != nil {
+			return fmt.Errorf("could not create failed_tracks.json: %w", err)
+		}
+		defer failedTracksFile.Close()
+
+		encoder := json.NewEncoder(failedTracksFile)
+		encoder.SetIndent("", "  ")
+		if err := encoder.Encode(failedTracks); err != nil {
+			return fmt.Errorf("could not encode failed tracks: %w", err)
+		}
+		log.Println("Failed tracks saved to failed_tracks.json")
+	} else {
+		log.Println("No tracks failed to migrate.")
 	}
 
 	return nil
